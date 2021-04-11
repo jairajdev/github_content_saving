@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>GitHub Content Saving</title>
+  </head>
+  <body>
+    <h1>Github Content Saving</h1>
+    <button id="btnAuthorizeGithub" style="display: block">
+      Authorize Github
+    </button>
+    <h3 id="loginname"></h3>
+    <div style="display: inline-flex">
+      <button id="btnGetRepo" style="display: none">List Repo</button>
+      <button id="btnUseRepo" style="display: none">Change Repo</button>
+    </div>
+    <br />
+    <br />
+    <form id="myform" style="display: none">
+      <div>
+        <label for="text" id="labelUpload"
+          >Enter the exact filename,content and commit you want to save on
+          Github repo""</label
+        >
+      </div>
+      <br />
+      <div>
+        File name with extension
+        <input form="myform" name="filename" required id="text" />
+      </div>
+      File content
+      <textarea
+        rows="4"
+        cols="25"
+        form="myform"
+        name="content"
+        required
+        id="text"
+      ></textarea>
+      <div>
+        Commit message
+        <input form="myform" name="commit" required id="text" />
+        <button type="submit" value="submit" id="myform-submit">
+          Upload File
+        </button>
+      </div>
+    </form>
+    <form id="myrepoform" style="display: none">
+      <div>
+        <label for="text" id="labelRepo"
+          >Enter the exact name of the repo that you want to create or use on
+          Github</label
+        >
+      </div>
+      <div>
+        <input form="myrepoform" name="repo" required id="text" />
+      </div>
+      <button type="submit" value="submit" id="myrepoform-submit">
+        Use Repo
+      </button>
+    </form>
+    <h3 id="success" style="display: none" style="color: blue">
+      File Upload Success!
+    </h3>
+    <br />
+    <pre id="content" style="white-space: pre-wrap"></pre>
+    <div id="divResult"></div>
+
+    <script>
+      const btnGetRepo = document.getElementById("btnGetRepo");
+      const btnUseRepo = document.getElementById("btnUseRepo");
+      const btnAuthorizeGithub = document.getElementById("btnAuthorizeGithub");
+      const success = document.getElementById("success");
+      const myform = document.getElementById("myform");
+      const btnUpload = document.getElementById("myform-submit");
+      const myrepoform = document.getElementById("myrepoform");
+      const btnCreateRepo = document.getElementById("myrepoform-submit");
+      const labelUpload = document.getElementById("labelUpload");
+      const labelRepo = document.getElementById("labelRepo");
+
+      const divResult = document.getElementById("divResult");
+      btnGetRepo.addEventListener("click", getRepos);
+      btnUseRepo.addEventListener("click", (e) => {
+        e.preventDefault();
+        myrepoform.style.display = "block";
+        myform.style.display = "none";
+        btnUseRepo.style.display = "none";
+      });
+      btnAuthorizeGithub.addEventListener("click", (e) => authorizeGithub());
+      btnCreateRepo.addEventListener("click", (e) => {
+        e.preventDefault();
+        createRepo();
+      });
+      btnUpload.addEventListener("click", (e) => {
+        e.preventDefault();
+        handleUploadClick();
+      });
+
+      let selected_repo = "";
+      let selected_file = "";
+
+      // Get this from Oauth App of GitHub Developer Settings
+      const client_id = "";
+      const client_secret = "";
+
+      async function checkState() {
+        const isLoggedIn = localStorage.getItem("githubToken") || false;
+        if (isLoggedIn) {
+          btnAuthorizeGithub.style.display = "none";
+          btnGetRepo.style.display = "block";
+          btnUseRepo.style.display = "block";
+          if (selected_repo === "") {
+            myrepoform.style.display = "block";
+            myform.style.display = "none";
+            btnUseRepo.style.display = "none";
+          } else {
+            myrepoform.style.display = "none";
+            myform.style.display = "block";
+          }
+          success.style.display = "none";
+          const loginname = document.getElementById("loginname");
+          loginname.innerHTML =
+            "Log in as " + localStorage.getItem("githubUsername");
+        } else {
+          btnAuthorizeGithub.style.display = "block";
+          btnGetRepo.style.display = "none";
+          btnUseRepo.style.display = "none";
+          myform.style.display = "none";
+          success.style.display = "none";
+          const urlParams = new URLSearchParams(window.location.search);
+          if (urlParams.get("code"))
+            authenticate(urlParams.get("code")).then(async (response) => {
+              if (response) {
+                localStorage.setItem("githubToken", response.access_token);
+                const { login } = await getAuthenticatedUser();
+                localStorage.setItem("githubUsername", login);
+                console.log(response);
+                window.location.reload();
+                // window.location.replace(window.location.origin);
+              }
+            });
+        }
+      }
+
+      const authenticate = async (code) => {
+        // Apparently we need to use a proxy to make this request (CORS blocked for client-side only applications)
+        const response = await fetch(
+          "https://cors-anywhere.herokuapp.com/https://github.com/login/oauth/access_token",
+          {
+            method: "POST",
+            body: new URLSearchParams({
+              client_id: client_id,
+              client_secret: client_secret,
+              code: code,
+            }),
+            headers: new Headers({
+              Accept: "application/json",
+              "Content-Type": "application/x-www-form-urlencoded",
+            }),
+          }
+        );
+
+        return response.json();
+      };
+
+      const getAuthenticatedUser = async () => {
+        const token = localStorage.getItem("githubToken");
+        if (token) {
+          const response = await fetch("https://api.github.com/user", {
+            headers: new Headers({
+              authorization: `Bearer ${token}`,
+            }),
+          });
+          const result = await response.json();
+          console.log(result);
+          result.token = token;
+          return result;
+        }
+      };
+
+      async function createRepo() {
+        clear();
+        const name = myrepoform.repo.value;
+        if (!name) {
+          success.innerHTML = "Please enter the repo name to use";
+          success.style.display = "block";
+          return;
+        }
+        const token = localStorage.getItem("githubToken");
+        const username = localStorage.getItem("githubUsername");
+        const repourl = `https://api.github.com/repos/${username}/${name}`;
+        const checkRepoExist = await fetch(repourl);
+        let result;
+        if (checkRepoExist.status === 200) {
+          result = await checkRepoExist.json();
+        } else {
+          const response = await fetch(`https://api.github.com/user/repos`, {
+            method: "POST",
+            body: JSON.stringify({
+              name: name,
+              description: "create repo with github create api",
+              homepage: "https://github.com",
+              private: false,
+              auto_init: true,
+            }),
+            headers: new Headers({
+              Accept: "application/vnd.github.v3+json",
+              Authorization: `Token ${token}`,
+            }),
+          });
+
+          result = await response.json();
+        }
+
+        if (result.id) {
+          success.innerHTML = "Using repo " + name + " !";
+          selected_repo = name;
+          labelUpload.innerHTML =
+            'Enter the exact filename,content and commit you want to save on Github repo "' +
+            selected_repo +
+            '"';
+          success.style.display = "block";
+          myform.style.display = "block";
+          myrepoform.style.display = "none";
+          btnUseRepo.style.display = "block";
+          myrepoform.repo.value = "";
+          myform.filename.value = "";
+          myform.content.value = "";
+          myform.commit.value = "";
+        } else {
+          success.innerHTML = "Error in creating Repo!";
+          success.style.display = "block";
+          console.log(result);
+        }
+      }
+
+      async function getRepos() {
+        clear();
+        const username = localStorage.getItem("githubUsername");
+        const url = `https://api.github.com/users/${username}/repos`;
+        const response = await fetch(url);
+        const result = await response.json();
+        if (response.status === 200) {
+          result.forEach((i) => {
+            const anchor = document.createElement("a");
+            anchor.href = i.html_url;
+            anchor.textContent = i.full_name;
+            divResult.appendChild(anchor);
+            divResult.appendChild(document.createElement("br"));
+          });
+        } else {
+          console.log(result);
+        }
+      }
+
+      async function handleUploadClick() {
+        const filename = myform.filename.value;
+        const fileContent = myform.content.value;
+        const fileCommit = myform.commit.value;
+        if (!fileContent || !filename || !fileCommit) {
+          success.innerHTML =
+            "Please enter the filename, content and commit message first!";
+          success.style.display = "block";
+          return;
+        }
+        const token = localStorage.getItem("githubToken");
+        const username = localStorage.getItem("githubUsername");
+        const file64 = window.btoa(fileContent);
+        const data = {
+          message: fileCommit,
+          content: file64,
+        };
+        const base_url = "https://api.github.com/repos/";
+        const file_url =
+          base_url + username + "/" + selected_repo + "/contents/" + filename;
+        const checkFileExist = await fetch(file_url);
+        if (checkFileExist.status === 200) {
+          const fileResult = await checkFileExist.json();
+          data.sha = fileResult.sha;
+        }
+        const response = await fetch(file_url, {
+          method: "PUT",
+          body: JSON.stringify(data),
+          headers: new Headers({
+            Accept: "application/vnd.github.v3+json",
+            Authorization: `Token ${token}`,
+          }),
+        });
+        const result = await response.json();
+        if (result.content) {
+          success.innerHTML = "Save file successfully!";
+          if (data.sha) {
+            success.innerHTML = "Update file successfully!";
+          }
+          success.style.display = "block";
+        } else {
+          success.innerHTML = "Error in saving file!";
+          success.style.display = "block";
+          console.log(result);
+        }
+      }
+
+      /**
+       * Append a pre element to the body containing the given message
+       * as its text node. Used to display the results of the API call.
+       *
+       * @param {string} message Text to be placed in pre element.
+       */
+      function appendPre(message) {
+        var pre = document.getElementById("content");
+        var textContent = document.createTextNode(message + "\n");
+        pre.appendChild(textContent);
+      }
+
+      async function authorizeGithub() {
+        clear();
+        window.location.href =
+          "https://github.com/login/oauth/authorize?client_id=" +
+          client_id +
+          "&scope=repo";
+      }
+
+      function clear() {
+        while (divResult.firstChild)
+          divResult.removeChild(divResult.firstChild);
+      }
+
+      checkState();
+    </script>
+  </body>
+</html>
